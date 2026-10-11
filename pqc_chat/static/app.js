@@ -394,6 +394,7 @@
 
   // Heartbeat keepalive to prevent Render / proxy idle disconnects (55s timeout)
   let pingTimer = null;
+  let reconnectTimer = null;
 
   function startPingHeartbeat() {
     stopPingHeartbeat();
@@ -416,8 +417,19 @@
   // Initialize WebSocket Connection
   function initWebSocket() {
     stopPingHeartbeat();
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
     if (ws) {
-      try { ws.close(); } catch (_) {}
+      // Detach handlers before closing to prevent triggering phantom reconnect loops
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.onopen = null;
+      try { ws.close(1000, "client_switching"); } catch (_) {}
+      ws = null;
     }
 
     const wsUrl = getWebSocketUrl();
@@ -463,11 +475,18 @@
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       stopPingHeartbeat();
       statusPill.style.background = 'rgba(239, 68, 68, 0.15)';
       statusText.textContent = 'Disconnected — Reconnecting...';
-      setTimeout(initWebSocket, 3000);
+
+      // Avoid auto-reconnect if intentionally closed
+      if (event && event.code === 1000) return;
+
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        initWebSocket();
+      }, 3500);
     };
 
     ws.onerror = (err) => {
