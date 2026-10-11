@@ -11,5 +11,3 @@ env
 .env
 .idea
 .vscode
-Dockerfile
-.dockerignore
