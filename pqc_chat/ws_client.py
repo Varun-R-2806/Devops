@@ -76,7 +76,7 @@ class PQCWebSocketClient:
         print(f"{BLUE}[IDENTITY]{RESET} User: {self.username}\n")
 
         try:
-            self.ws = await websockets.connect(self.uri)
+            self.ws = await websockets.connect(self.uri, ping_interval=15, ping_timeout=20)
         except Exception as e:
             print(f"{RED}[ERROR]{RESET} Failed to connect to {self.uri}: {e}")
             return False

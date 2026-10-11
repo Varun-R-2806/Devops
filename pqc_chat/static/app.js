@@ -392,8 +392,30 @@
     }
   }
 
+  // Heartbeat keepalive to prevent Render / proxy idle disconnects (55s timeout)
+  let pingTimer = null;
+
+  function startPingHeartbeat() {
+    stopPingHeartbeat();
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        } catch (_) {}
+      }
+    }, 15000); // Send ping every 15s
+  }
+
+  function stopPingHeartbeat() {
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+  }
+
   // Initialize WebSocket Connection
   function initWebSocket() {
+    stopPingHeartbeat();
     if (ws) {
       try { ws.close(); } catch (_) {}
     }
@@ -406,11 +428,17 @@
     ws.onopen = () => {
       statusPill.style.background = 'rgba(16, 185, 129, 0.15)';
       statusText.textContent = `Room #${currentRoom} Active`;
+      startPingHeartbeat();
     };
 
     ws.onmessage = async (event) => {
       try {
         const data = JSON.parse(event.data);
+
+        // Heartbeat response
+        if (data.type === 'pong') {
+          return;
+        }
 
         if (data.type === 'handshake_init') {
           await performHandshake(data);
@@ -436,12 +464,14 @@
     };
 
     ws.onclose = () => {
+      stopPingHeartbeat();
       statusPill.style.background = 'rgba(239, 68, 68, 0.15)';
       statusText.textContent = 'Disconnected — Reconnecting...';
       setTimeout(initWebSocket, 3000);
     };
 
     ws.onerror = (err) => {
+      stopPingHeartbeat();
       console.error('WebSocket error:', err);
     };
   }
