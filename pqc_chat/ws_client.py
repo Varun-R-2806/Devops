@@ -54,9 +54,15 @@ RED = "\033[31m"
 
 
 class PQCWebSocketClient:
-    def __init__(self, uri: str, username: str):
+    def __init__(self, uri: str, username: str, room: str = "global"):
+        sep = "&" if "?" in uri else "?"
+        if "room=" not in uri:
+            uri = f"{uri}{sep}room={room}"
+        if "username=" not in uri:
+            uri = f"{uri}&username={username}"
         self.uri = uri
         self.username = username
+        self.room = room
         self.session_key: bytes | None = None
         self.kem: oqs.KeyEncapsulation | None = None
         self.ws = None
@@ -244,6 +250,11 @@ def main():
         help="Username for the chat session",
     )
     parser.add_argument(
+        "--room",
+        default="global",
+        help="Room name to join (default: global)",
+    )
+    parser.add_argument(
         "--demo",
         action="store_true",
         help="Run a quick automated round-trip demo and exit",
@@ -256,7 +267,7 @@ def main():
     )
 
     args = parser.parse_args()
-    client = PQCWebSocketClient(args.server, args.username)
+    client = PQCWebSocketClient(args.server, args.username, args.room)
 
     if args.demo or args.message:
         msg = args.message or "Quantum greetings! Hybrid PQC channel verified."

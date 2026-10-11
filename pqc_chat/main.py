@@ -42,6 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("pqc_server")
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Connection State
 # ---------------------------------------------------------------------------
 @dataclass
@@ -49,6 +50,7 @@ class ClientSession:
     websocket: WebSocket
     session_id: str
     username: str
+    room: str = "global"
     client_type: str = "web"  # "web" or "cli"
     session_key: Optional[bytes] = None
     key_fingerprint: Optional[str] = None
@@ -65,20 +67,21 @@ class ConnectionManager:
         self.total_connections: int = 0
         self.total_messages: int = 0
 
-    async def register(self, websocket: WebSocket, username: str, client_type: str) -> ClientSession:
+    async def register(self, websocket: WebSocket, username: str, client_type: str, room: str = "global") -> ClientSession:
         session_id = secrets.token_hex(4)
         session = ClientSession(
             websocket=websocket,
             session_id=session_id,
             username=username,
+            room=room,
             client_type=client_type,
         )
         self.active_sessions[websocket] = session
         self.total_connections += 1
-        logger.info(f"Registered session {session_id} for user '{username}' ({client_type})")
+        logger.info(f"Registered session {session_id} for user '{username}' ({client_type}) in room '{room}'")
         return session
 
-    def unregister(self, websocket: WebSocket):
+    def unregister(self, websocket: WebSocket) -> Optional[ClientSession]:
         if websocket in self.active_sessions:
             session = self.active_sessions.pop(websocket)
             if session.server_kem:
@@ -87,19 +90,56 @@ class ConnectionManager:
                 except Exception:
                     pass
             logger.info(f"Unregistered session {session.session_id} ('{session.username}')")
+            return session
+        return None
 
-    async def broadcast_system(self, text: str):
+    def get_room_users(self, room: str):
+        return [
+            {
+                "session_id": s.session_id,
+                "username": s.username,
+                "client_type": s.client_type,
+                "secured": s.handshake_complete,
+                "fingerprint": s.key_fingerprint,
+                "connected_at": s.connected_at,
+            }
+            for s in self.active_sessions.values()
+            if s.room == room
+        ]
+
+    async def broadcast_room_user_list(self, room: str):
+        users = self.get_room_users(room)
+        msg = {
+            "type": "user_list",
+            "room": room,
+            "users": users,
+            "online_count": len(users),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        dead = []
+        for ws, session in list(self.active_sessions.items()):
+            if session.room == room:
+                try:
+                    await ws.send_text(json.dumps(msg))
+                except Exception:
+                    dead.append(ws)
+        for ws in dead:
+            self.unregister(ws)
+
+    async def broadcast_room_system(self, room: str, text: str):
         msg = {
             "type": "system",
+            "room": room,
             "text": text,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         dead = []
-        for ws, session in self.active_sessions.items():
-            try:
-                await ws.send_text(json.dumps(msg))
-            except Exception:
-                dead.append(ws)
+        for ws, session in list(self.active_sessions.items()):
+            if session.room == room:
+                try:
+                    await ws.send_text(json.dumps(msg))
+                except Exception:
+                    dead.append(ws)
         for ws in dead:
             self.unregister(ws)
 
@@ -108,6 +148,7 @@ class ConnectionManager:
             {
                 "session_id": s.session_id,
                 "username": s.username,
+                "room": s.room,
                 "client_type": s.client_type,
                 "secured": s.handshake_complete,
                 "fingerprint": s.key_fingerprint,
@@ -213,8 +254,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     query_params = websocket.query_params
     requested_username = query_params.get("username") or f"Guest-{secrets.token_hex(2).upper()}"
     client_type = query_params.get("client_type") or "web"
+    room = query_params.get("room") or "global"
 
-    session = await manager.register(websocket, requested_username, client_type)
+    session = await manager.register(websocket, requested_username, client_type, room=room)
 
     try:
         # --- Step 1: Server generates ephemeral keypairs ---
@@ -228,6 +270,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
         init_payload = {
             "type": "handshake_init",
             "session_id": session.session_id,
+            "room": session.room,
             "server_ecdh_pub": b64encode(ecdh_pub_bytes),
             "server_kyber_pub": b64encode(kyber_pub_bytes),
             "curve": "SECP256R1",
@@ -270,7 +313,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
         session.server_kem = None
 
         logger.info(
-            f"Handshake SUCCESS with {session.username} ({session.client_type}). "
+            f"Handshake SUCCESS with {session.username} ({session.client_type}) in room '{session.room}'. "
             f"Key Fingerprint: {session.key_fingerprint}"
         )
 
@@ -279,16 +322,19 @@ async def websocket_chat_endpoint(websocket: WebSocket):
             "type": "handshake_complete",
             "session_id": session.session_id,
             "username": session.username,
+            "room": session.room,
             "status": "ready",
             "key_fingerprint": session.key_fingerprint,
             "session_key_hex_preview": session_key[:6].hex() + "...",
-            "online_users": manager.get_online_users(),
+            "online_users": manager.get_room_users(session.room),
         }
         await websocket.send_text(json.dumps(ack_payload))
 
-        # Notify others
-        await manager.broadcast_system(
-            f"{session.username} ({session.client_type.upper()}) joined the PQC channel. "
+        # Notify room members and broadcast updated user list
+        await manager.broadcast_room_user_list(session.room)
+        await manager.broadcast_room_system(
+            session.room,
+            f"{session.username} ({session.client_type.upper()}) joined room '{session.room}'. "
             f"Key fingerprint: {session.key_fingerprint}"
         )
 
@@ -315,22 +361,23 @@ async def websocket_chat_endpoint(websocket: WebSocket):
 
                 session.messages_sent += 1
                 manager.total_messages += 1
-                logger.info(f"[{session.username} -> Server] Decrypted: '{plaintext}'")
+                logger.info(f"[{session.username} in #{session.room}] Decrypted: '{plaintext}'")
 
-                # Broadcast to other online secured peers
-                other_peers = [
+                # Broadcast to other online secured peers in the same room
+                room_peers = [
                     (ws, s)
                     for ws, s in manager.active_sessions.items()
-                    if ws != websocket and s.handshake_complete and s.session_key
+                    if ws != websocket and s.room == session.room and s.handshake_complete and s.session_key
                 ]
 
-                for peer_ws, peer_session in other_peers:
+                for peer_ws, peer_session in room_peers:
                     try:
                         # Re-encrypt with peer's specific post-quantum session key
                         peer_encrypted = encrypt_message(peer_session.session_key, plaintext)
                         peer_packet = {
                             "type": "chat_msg",
                             "sender": session.username,
+                            "room": session.room,
                             "payload": b64encode(peer_encrypted),
                             "ciphertext_hex_preview": peer_encrypted.hex()[:32] + "...",
                             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -339,8 +386,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                     except Exception as broadcast_err:
                         logger.error(f"Broadcast error to {peer_session.username}: {broadcast_err}")
 
-                # If sender is alone or wants assistant confirmation, generate Quantum Bot reply
-                if not other_peers or session.client_type == "web":
+                # Bot reply: Only reply if alone in the room OR explicitly tagged "@bot"
+                wants_bot = "@bot" in plaintext.lower() or "quantum bot" in plaintext.lower()
+                if not room_peers or wants_bot:
                     bot_replies = [
                         f"Post-quantum handshake verified! Received '{plaintext}'. Zero tampering detected on AES-256-GCM tag.",
                         f"Encrypted message delivered across hybrid channel. Shor's algorithm cannot compromise Kyber512 secret.",
@@ -352,25 +400,27 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                     bot_packet = {
                         "type": "chat_msg",
                         "sender": "[Bot] Quantum AI",
+                        "room": session.room,
                         "payload": b64encode(bot_encrypted),
                         "ciphertext_hex_preview": bot_encrypted.hex()[:32] + "...",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
-                    # Slight delay for natural chat rhythm
                     await asyncio.sleep(0.3)
                     await websocket.send_text(json.dumps(bot_packet))
 
             elif msg_type == "ping":
-                await websocket.send_text(json.dumps({"type": "pong", "online_count": len(manager.active_sessions)}))
+                await websocket.send_text(json.dumps({"type": "pong", "online_count": len(manager.get_room_users(session.room))}))
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for {session.username}")
+        logger.info(f"WebSocket disconnected for {session.username} in room {session.room}")
     except Exception as exc:
         logger.error(f"WebSocket exception in session {session.session_id}: {exc}")
     finally:
         departed_user = session.username
+        departed_room = session.room
         manager.unregister(websocket)
-        await manager.broadcast_system(f"{departed_user} left the channel.")
+        await manager.broadcast_room_user_list(departed_room)
+        await manager.broadcast_room_system(departed_room, f"{departed_user} left room '{departed_room}'.")
 
 
 # Serve static web dashboard

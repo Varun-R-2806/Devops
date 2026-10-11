@@ -2,10 +2,20 @@
    app.js — Frontend Client for Hybrid PQC Secured Chat
    Performs live hybrid ECDH (P-256) + Kyber512 handshake over WebSockets
    and authenticates real-time AES-256-GCM encrypted messages via Web Crypto.
+   Supports rooms, shareable invite links, and multi-user chat.
    -------------------------------------------------------------------------- */
 
 (function () {
   'use strict';
+
+  // Read URL query parameters for room and username
+  const urlParams = new URLSearchParams(window.location.search);
+  let currentRoom = (urlParams.get('room') || 'global').trim().toLowerCase();
+  
+  // Stored username or generate random
+  let savedName = localStorage.getItem('pqc_username');
+  let myUsername = (urlParams.get('username') || savedName || 'User-' + Math.floor(1000 + Math.random() * 9000)).trim();
+  localStorage.setItem('pqc_username', myUsername);
 
   // State
   let ws = null;
@@ -13,7 +23,6 @@
   let aesCryptoKey = null;
   let keyFingerprint = null;
   let showWireCiphertext = false;
-  let myUsername = 'WebUser-' + Math.floor(1000 + Math.random() * 9000);
 
   // DOM Elements
   const statusPill = document.getElementById('server-status-pill');
@@ -27,11 +36,45 @@
   const btnClearChat = document.getElementById('btn-clear-chat');
   const bannerFingerprint = document.getElementById('banner-fingerprint');
   const paramFingerprint = document.getElementById('param-fingerprint');
+
+  // Multi-user & Room Elements
+  const currentRoomDisplay = document.getElementById('current-room-display');
+  const myUsernameDisplay = document.getElementById('my-username-display');
+  const btnEditUser = document.getElementById('btn-edit-user');
+  const btnEditRoom = document.getElementById('btn-edit-room');
+  const btnInviteFriend = document.getElementById('btn-invite-friend');
+  const toastNotification = document.getElementById('toast-notification');
+  const membersTags = document.getElementById('members-tags');
+  const membersAloneBanner = document.getElementById('members-alone-banner');
+  const membersCountLabel = document.getElementById('members-count-label');
+
+  // Modals
   const cliModal = document.getElementById('cli-modal');
   const btnCliModal = document.getElementById('btn-cli-modal');
   const btnCloseModal = document.getElementById('btn-close-modal');
   const cliCommandText = document.getElementById('cli-command-text');
   const btnCopyCommand = document.getElementById('btn-copy-command');
+
+  const profileModal = document.getElementById('profile-modal');
+  const btnCloseProfile = document.getElementById('btn-close-profile');
+  const profileForm = document.getElementById('profile-form');
+  const inputUsername = document.getElementById('input-username');
+  const inputRoom = document.getElementById('input-room');
+
+  // Initialize Header Labels
+  if (currentRoomDisplay) currentRoomDisplay.textContent = currentRoom;
+  if (myUsernameDisplay) myUsernameDisplay.textContent = myUsername;
+
+  // Toast Notification Helper
+  function showToast(message) {
+    if (!toastNotification) return;
+    toastNotification.textContent = message;
+    toastNotification.classList.remove('hidden');
+    clearTimeout(toastNotification._timer);
+    toastNotification._timer = setTimeout(() => {
+      toastNotification.classList.add('hidden');
+    }, 2800);
+  }
 
   // Binary / Base64 Helpers
   function bytesToBase64(bytes) {
@@ -62,14 +105,16 @@
   function getWebSocketUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    return `${protocol}//${host}/ws/chat?username=${encodeURIComponent(myUsername)}&client_type=web`;
+    return `${protocol}//${host}/ws/chat?username=${encodeURIComponent(myUsername)}&room=${encodeURIComponent(currentRoom)}&client_type=web`;
   }
 
   // Update CLI Modal command string with live current domain
   function updateCliCommandString() {
-    const wsUrl = getWebSocketUrl();
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws/chat`;
     if (cliCommandText) {
-      cliCommandText.textContent = `python ws_client.py --server ${wsUrl} --username Bob`;
+      cliCommandText.textContent = `python ws_client.py --server ${wsUrl} --room ${currentRoom} --username Bob`;
     }
   }
 
@@ -138,6 +183,39 @@
 
     messagesFeed.appendChild(bubble);
     messagesFeed.scrollTop = messagesFeed.scrollHeight;
+  }
+
+  // Update Online Members Tags
+  function updateOnlineMembers(users) {
+    if (!membersTags) return;
+    membersTags.innerHTML = '';
+
+    users.forEach(u => {
+      const tag = document.createElement('span');
+      const isMe = u.username === myUsername;
+      tag.className = `member-tag ${isMe ? 'me' : ''}`;
+      tag.textContent = isMe ? `${u.username} (You)` : `${u.username} (${u.client_type.toUpperCase()})`;
+      if (u.fingerprint) {
+        tag.title = `Key Fingerprint: ${u.fingerprint}`;
+      }
+      membersTags.appendChild(tag);
+    });
+
+    if (peerCountEl) {
+      peerCountEl.textContent = `${users.length} Online`;
+    }
+    if (membersCountLabel) {
+      membersCountLabel.textContent = `Online Members (${users.length}):`;
+    }
+
+    // Show alone banner if only 1 user in room
+    if (membersAloneBanner) {
+      if (users.length <= 1) {
+        membersAloneBanner.classList.remove('hidden');
+      } else {
+        membersAloneBanner.classList.add('hidden');
+      }
+    }
   }
 
   // Perform Client-Side Hybrid Handshake
@@ -316,6 +394,10 @@
 
   // Initialize WebSocket Connection
   function initWebSocket() {
+    if (ws) {
+      try { ws.close(); } catch (_) {}
+    }
+
     const wsUrl = getWebSocketUrl();
     console.log('Connecting to WebSocket:', wsUrl);
 
@@ -323,7 +405,7 @@
 
     ws.onopen = () => {
       statusPill.style.background = 'rgba(16, 185, 129, 0.15)';
-      statusText.textContent = 'Negotiating PQC Handshake...';
+      statusText.textContent = `Room #${currentRoom} Active`;
     };
 
     ws.onmessage = async (event) => {
@@ -334,10 +416,14 @@
           await performHandshake(data);
         } else if (data.type === 'handshake_complete') {
           setStepActive(4, true);
-          statusText.textContent = 'Quantum-Safe Channel Active';
-          addSystemMessage('Hybrid PQC Handshake completed. AES-256-GCM channel established.');
+          statusText.textContent = `Room #${currentRoom} Active`;
+          addSystemMessage(`Hybrid PQC Handshake complete. AES-256-GCM encryption active in #${currentRoom}.`);
           if (data.online_users) {
-            peerCountEl.textContent = `${data.online_users.length} Online`;
+            updateOnlineMembers(data.online_users);
+          }
+        } else if (data.type === 'user_list') {
+          if (data.users) {
+            updateOnlineMembers(data.users);
           }
         } else if (data.type === 'chat_msg') {
           await decryptIncomingMessage(data.payload, data.sender, data.ciphertext_hex_preview);
@@ -396,6 +482,70 @@
     messagesFeed.innerHTML = '';
     addSystemMessage('Chat feed cleared.');
   });
+
+  // Invite Friend Button Handler
+  if (btnInviteFriend) {
+    btnInviteFriend.addEventListener('click', () => {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoom)}`;
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        showToast(`📋 Room #${currentRoom} invite link copied! Send it to your friend.`);
+      }).catch(() => {
+        prompt('Copy this invite link to share with your friend:', shareUrl);
+      });
+    });
+  }
+
+  // Profile Modal Handlers
+  function openProfileModal() {
+    if (!profileModal) return;
+    if (inputUsername) inputUsername.value = myUsername;
+    if (inputRoom) inputRoom.value = currentRoom;
+    profileModal.classList.remove('hidden');
+  }
+
+  function closeProfileModal() {
+    if (profileModal) profileModal.classList.add('hidden');
+  }
+
+  if (btnEditUser) btnEditUser.addEventListener('click', openProfileModal);
+  if (btnEditRoom) btnEditRoom.addEventListener('click', openProfileModal);
+  if (btnCloseProfile) btnCloseProfile.addEventListener('click', closeProfileModal);
+
+  if (profileModal) {
+    profileModal.addEventListener('click', (e) => {
+      if (e.target === profileModal) closeProfileModal();
+    });
+  }
+
+  if (profileForm) {
+    profileForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newName = inputUsername.value.trim();
+      const newRoom = inputRoom.value.trim().toLowerCase();
+
+      if (!newName || !newRoom) return;
+
+      myUsername = newName;
+      currentRoom = newRoom;
+      localStorage.setItem('pqc_username', myUsername);
+
+      // Update URL without reloading page
+      const newUrl = `${window.location.pathname}?room=${encodeURIComponent(currentRoom)}`;
+      window.history.pushState({}, '', newUrl);
+
+      // Update Header labels
+      if (myUsernameDisplay) myUsernameDisplay.textContent = myUsername;
+      if (currentRoomDisplay) currentRoomDisplay.textContent = currentRoom;
+
+      closeProfileModal();
+      showToast(`Switched to room #${currentRoom} as "${myUsername}". Reconnecting...`);
+
+      // Reconnect to new room
+      messagesFeed.innerHTML = '';
+      updateCliCommandString();
+      initWebSocket();
+    });
+  }
 
   // CLI Modal Handlers
   btnCliModal.addEventListener('click', () => {
