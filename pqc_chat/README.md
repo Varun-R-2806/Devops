@@ -1,109 +1,160 @@
 # Hybrid Post-Quantum Cryptography (PQC) Secured Chat
 
-A minimal, working demonstration of a **hybrid key exchange** that combines
-classical elliptic-curve Diffie-Hellman (ECDH) with the post-quantum Key
-Encapsulation Mechanism (KEM) **Kyber512**, producing a single AES-256-GCM
-session key for encrypted messaging.
+A complete, working demonstration and cloud-ready web application featuring a **hybrid key exchange** that combines classical elliptic-curve Diffie-Hellman (ECDH SECP256R1 / P-256) with the NIST post-quantum Key Encapsulation Mechanism (KEM) **Kyber512 (ML-KEM-512 / FIPS 203)**, producing a 256-bit AES-GCM session key for real-time encrypted messaging.
+
+---
+
+## Features
+
+- **Dual-Mode Access**:
+  - **Interactive Web App**: Responsive dark-mode dashboard with real-time 4-step handshake visualizer, cryptographic wire inspector (hex dumps of public keys, ciphertexts, and nonces), and live encrypted chat.
+  - **Python Terminal CLI Client**: Connect from command-line terminals locally or over the internet via WebSockets.
+- **Post-Quantum Cryptographic Suite**:
+  - **Classical KEM**: ECDH SECP256R1 (P-256) NIST standard
+  - **PQC KEM**: CRYSTALS-Kyber512 (ML-KEM-512 / NIST FIPS 203) via `liboqs`
+  - **Key Derivation**: HKDF-SHA256 (`info=b"hybrid-pqc-chat-v1"`)
+  - **AEAD Encryption**: AES-256-GCM with fresh 96-bit random nonces
+- **Cloud-Ready for Free Hosting**:
+  - Includes multi-stage `Dockerfile` and `render.yaml` Blueprint for **100% free hosting on Render** (or Koyeb, Hugging Face Spaces, Fly.io).
+  - WebSockets over standard HTTPS (Port 443) bypasses restrictive cloud firewalls and operates seamlessly on all free cloud tiers.
+  - Built-in `/healthz` zero-downtime health probe.
 
 ---
 
 ## Why Hybrid (Classical + PQC)?
 
-| Threat | Classical ECDH alone | Kyber512 alone | Hybrid |
+| Threat Model | Classical ECDH Alone | Kyber512 Alone | Hybrid (Ours) |
 |---|---|---|---|
 | Today's adversaries | ✅ Secure | ✅ Secure | ✅ Secure |
 | Future quantum computer (Shor's algorithm) | ❌ Broken | ✅ Secure | ✅ Secure |
-| Undiscovered flaw in Kyber | ✅ Secure | ❌ Broken | ✅ Secure |
+| Undiscovered mathematical flaw in Kyber | ✅ Secure | ❌ Broken | ✅ Secure |
 
-A hybrid scheme is secure **as long as at least one** of the two primitives
-remains unbroken. This is the recommended transition strategy from NIST,
-ETSI, and the German BSI during the current migration period to PQC standards.
+A hybrid scheme is secure **as long as at least one** of the two primitives remains unbroken. This is the official transition strategy recommended by NIST, ETSI, and the German BSI.
 
 ---
 
-## Dependencies
+## Quickstart (Local Development)
+
+### 1. Install Dependencies
 
 ```bash
-pip install liboqs-python cryptography
+pip install -r requirements.txt
 ```
 
-> `liboqs-python` requires the native `liboqs` shared library to be installed.
-> See [open-quantum-safe/liboqs-python](https://github.com/open-quantum-safe/liboqs-python)
-> for platform-specific installation instructions.
+> **Note**: `liboqs-python` requires the native `liboqs` shared library. On Linux/Docker, the included `Dockerfile` builds this automatically. On Windows, ensure pre-built `liboqs` or wheels are accessible.
 
----
+### 2. Start the Full-Stack Web & WebSocket Server
 
-## How to Run
-
-Open **two terminals** in this directory:
-
-**Terminal 1 — Start the server first:**
 ```bash
+python main.py
+```
+Open **[http://localhost:8000](http://localhost:8000)** in your browser to view the interactive PQC dashboard and chat!
+
+### 3. Connect from the Terminal (Python CLI)
+
+Open another terminal:
+```bash
+# Interactive chat
+python ws_client.py --username Alice
+
+# Automated test / demo verification
+python ws_client.py --demo
+```
+
+### 4. Original Raw TCP Socket Scripts (Optional)
+
+You can also run the original standalone socket demonstration:
+```bash
+# Terminal 1
 python server.py
-```
 
-**Terminal 2 — Run the client:**
-```bash
+# Terminal 2
 python client.py
 ```
 
-Expected output: both sides print the derived session key (identical hex string),
-the client's plaintext message appears on the server, and the server's reply
-appears on the client.
+---
+
+## Deploy to Free Cloud Hosting (Render)
+
+### Option A: 1-Click Render Blueprint (Recommended)
+
+1. Push your repository to GitHub (`https://github.com/Varun-R-2806/Devops`).
+2. Go to [Render Dashboard](https://dashboard.render.com).
+3. Click **New +** → **Blueprint**.
+4. Select your **Devops** repository. Render automatically detects `render.yaml`.
+5. Click **Apply**. Render builds the Docker image and provisions your free public URL (`https://<your-service>.onrender.com`).
+
+### Option B: Manual Web Service on Render
+
+1. In Render Dashboard, click **New +** → **Web Service**.
+2. Select your GitHub repository.
+3. Configure the following:
+   - **Name**: `pqc-secure-chat`
+   - **Runtime**: `Docker`
+   - **Root Directory**: `pqc_chat` (or leave blank if deploying root)
+   - **Plan**: `Free`
+   - **Health Check Path**: `/healthz`
+4. Click **Create Web Service**.
+
+Once deployed, you can access the Web UI from anywhere and run the CLI client against your live deployment:
+```bash
+python ws_client.py --server wss://<your-app>.onrender.com/ws/chat --username Bob
+```
 
 ---
 
-## Architecture — Handshake Steps (in order)
+## Protocol & Wire Architecture
 
 ```
-CLIENT                                          SERVER
-  |                                               |
-  |  1. Server generates ECDH keypair             |
-  |     Server generates Kyber512 keypair         |
-  |                                               |
-  |<---- server_ecdh_pub_key (DER) --------------|  (2)
-  |<---- kyber_server_pub_key (raw bytes) --------|  (3)
-  |                                               |
-  |  4. Client generates ECDH keypair             |
-  |  5. Client computes ECDH shared secret        |
-  |     (client_ecdh_priv × server_ecdh_pub)      |
-  |  6. Client encapsulates kyber_server_pub_key  |
-  |     → (kyber_ciphertext, kyber_shared_secret) |
-  |                                               |
-  |---- client_ecdh_pub_key (DER) -------------->|  (7)
-  |---- kyber_ciphertext ----------------------->|  (8)
-  |                                               |
-  |  9. Server computes ECDH shared secret        |
-  |     (server_ecdh_priv × client_ecdh_pub)      |
-  | 10. Server decapsulates kyber_ciphertext      |
-  |     → kyber_shared_secret                     |
-  |                                               |
-  | CLIENT & SERVER both run:                     |
-  | session_key = HKDF(ecdh_secret || kyber_secret, info="hybrid-pqc-chat-v1")
-  |                                               |
-  |---- AES-256-GCM(session_key, message) ------>| (11)
-  |<---- AES-256-GCM(session_key, reply) ---------|  (12)
+CLIENT                                                           SERVER
+  |                                                                |
+  |  1. WebSocket Connect (/ws/chat)                               |
+  |<--------------------- handshake_init --------------------------|
+  |                       - server_ecdh_pub (91 B DER)             |
+  |                       - server_kyber_pub (800 B)               |
+  |                                                                |
+  |  2. Client generates ECDH keypair                              |
+  |     Client computes ecdh_shared_secret                         |
+  |     Client encapsulates Kyber server pubkey                    |
+  |       → (kyber_ciphertext, kyber_shared_secret)                |
+  |                                                                |
+  |---------------------- handshake_reply ------------------------>|
+  |                       - client_ecdh_pub (91 B DER)             |
+  |                       - kyber_ciphertext (768 B)               |
+  |                                                                |
+  |  3. Server computes ecdh_shared_secret                         |
+  |     Server decapsulates kyber_ciphertext                       |
+  |       → recovers kyber_shared_secret                           |
+  |                                                                |
+  |  4. Both parties execute HKDF:                                 |
+  |     session_key = HKDF(ecdh_secret || kyber_secret)            |
+  |                                                                |
+  |<------------------- handshake_complete ------------------------|
+  |                                                                |
+  |  5. Authenticated AES-256-GCM Messaging                       |
+  |---- {"type": "encrypted_msg", "payload": "<nonce || ct>"} ---->|
+  |<--- {"type": "chat_msg", "payload": "<nonce || ct>"} ----------|
 ```
-
-### Key Design Decisions
-
-| Decision | Choice | Rationale |
-|---|---|---|
-| Classical KEM | ECDH (SECP256R1 / P-256) | NIST-approved, universally supported, ~128-bit classical security |
-| PQC KEM | Kyber512 | NIST FIPS 203 winner (ML-KEM); ~128-bit post-quantum security; fastest PQC KEM in practice |
-| Key derivation | HKDF-SHA256 | Standardized (RFC 5869); extracts and expands raw DH output into a uniform key; domain-separated via `info` tag |
-| Symmetric cipher | AES-256-GCM | Authenticated encryption (AEAD); single-pass confidentiality + integrity; hardware-accelerated on modern CPUs |
-| Framing | 4-byte length prefix | TCP is a stream; length-prefixing gives reliable message boundaries without external framing libraries |
-| Nonce | 12-byte random per message | 96-bit GCM nonce is the NIST recommendation; random nonce is safe for single-session demos |
 
 ---
 
-## File Structure
+## Repository Structure
 
 ```
-pqc_chat/
-├── crypto_utils.py   # ECDH keygen, HKDF derivation, AES-GCM encrypt/decrypt
-├── server.py         # TCP server: hybrid handshake + message receive/reply
-├── client.py         # TCP client: hybrid handshake + message send/receive
-└── README.md         # This file
+Devops/
+├── render.yaml               # 1-Click Render Blueprint configuration
+└── pqc_chat/
+    ├── main.py               # FastAPI server + WebSocket PQC handler + Health check
+    ├── ws_client.py          # Interactive & demo WebSocket Python CLI client
+    ├── crypto_utils.py       # ECDH, Kyber, HKDF-SHA256, AES-256-GCM primitives
+    ├── requirements.txt      # Python dependencies
+    ├── Dockerfile            # Multi-stage container build with native liboqs
+    ├── .dockerignore         # Exclusions for clean container builds
+    ├── render.yaml           # Subdirectory Render config
+    ├── server.py             # Original local TCP server
+    ├── client.py             # Original local TCP client
+    └── static/
+        ├── index.html        # Modern PQC web dashboard
+        ├── style.css         # Glassmorphism dark-mode styles
+        └── app.js            # Web Crypto hybrid handshake & messaging
 ```

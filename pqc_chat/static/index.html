@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hybrid Post-Quantum Cryptography (PQC) Secured Chat</title>
+  <meta name="description" content="Next-generation chat platform secured by NIST FIPS 203 Kyber512 (ML-KEM) and Classical ECDH SECP256R1 hybrid key exchange.">
+  
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Background Glow & Grid Orbs -->
+  <div class="bg-glow orb-1"></div>
+  <div class="bg-glow orb-2"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+          <span class="brand-pulse"></span>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">PQC SecureChat <span class="badge-hybrid">HYBRID LEVEL 1</span></div>
+          <div class="brand-subtitle">NIST FIPS 203 (ML-KEM / Kyber512) + ECDH SECP256R1</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-pill" id="server-status-pill">
+          <span class="status-dot online"></span>
+          <span id="server-status-text">Quantum-Safe Channel Active</span>
+        </div>
+        <div class="stat-badge" title="Active peers in room">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          <span id="peer-count">1 Online</span>
+        </div>
+        <button class="btn-icon" id="btn-cli-modal" title="Connect Python CLI Client">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <span>CLI Client</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-layout">
+    <!-- Left Column: Interactive Chat Stream -->
+    <section class="chat-section card-glass">
+      <div class="chat-header">
+        <div class="chat-title-group">
+          <h2>Encrypted Chat Stream</h2>
+          <div class="cipher-tag">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>AES-256-GCM / 96-bit Nonce</span>
+          </div>
+        </div>
+        <div class="chat-controls">
+          <button class="toggle-btn" id="btn-toggle-cipher" title="Toggle between decrypted plaintext and raw wire ciphertext">
+            <span class="toggle-icon">⇄</span>
+            <span id="toggle-cipher-label">View Wire Ciphertext</span>
+          </button>
+          <button class="btn-subtle" id="btn-clear-chat" title="Clear message feed">Clear</button>
+        </div>
+      </div>
+
+      <!-- Security Handshake Banner -->
+      <div class="handshake-banner" id="handshake-banner">
+        <div class="banner-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <path d="m9 12 2 2 4-4"></path>
+          </svg>
+        </div>
+        <div class="banner-content">
+          <div class="banner-title">Hybrid Session Key Ratchet Established</div>
+          <div class="banner-meta">
+            Key Fingerprint: <code id="banner-fingerprint">Computing...</code> | 
+            HKDF-SHA256 <span class="tag-quantum">Shor's Resilient</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages Feed -->
+      <div class="messages-container" id="messages-feed">
+        <!-- Rendered messages will appear here -->
+      </div>
+
+      <!-- Quick Message Prompt Chips -->
+      <div class="prompt-chips">
+        <span class="chip-label">Quick Test:</span>
+        <button class="chip" data-msg="Verify hybrid quantum key agreement.">Verify PQC</button>
+        <button class="chip" data-msg="Test Shor's algorithm resistance under Kyber512.">Shor's Test</button>
+        <button class="chip" data-msg="Validate AEAD integrity and 96-bit random nonce.">Validate AEAD</button>
+      </div>
+
+      <!-- Chat Input Bar -->
+      <form class="chat-input-bar" id="chat-form">
+        <input 
+          type="text" 
+          id="chat-input" 
+          placeholder="Type a message to encrypt with AES-256-GCM..." 
+          autocomplete="off" 
+          required
+        />
+        <button type="submit" id="btn-send" class="btn-send">
+          <span>Encrypt & Send</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
+    </section>
+
+    <!-- Right Column: Handshake Visualizer & Cryptographic Inspector -->
+    <aside class="sidebar-section">
+      <!-- 4-Step Handshake Progress Card -->
+      <div class="card-glass stepper-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <h3>Hybrid Handshake Protocol</h3>
+        </div>
+        <p class="stepper-desc">Real-time trace of the hybrid Diffie-Hellman + KEM protocol negotiation:</p>
+
+        <div class="stepper-steps">
+          <div class="step-item completed" id="step-1">
+            <div class="step-number">1</div>
+            <div class="step-details">
+              <div class="step-heading">Server Ephemeral Key Broadcast</div>
+              <div class="step-info">Server generates ECDH (P-256) + Kyber512 keypair</div>
+            </div>
+            <div class="step-status">✓</div>
+          </div>
+
+          <div class="step-item completed" id="step-2">
+            <div class="step-number">2</div>
+            <div class="step-details">
+              <div class="step-heading">Client Key Agreement & Encapsulation</div>
+              <div class="step-info">Client creates ECDH pubkey + Kyber ciphertext (768 B)</div>
+            </div>
+            <div class="step-status">✓</div>
+          </div>
+
+          <div class="step-item completed" id="step-3">
+            <div class="step-number">3</div>
+            <div class="step-details">
+              <div class="step-heading">HKDF-SHA256 Secret Concatenation</div>
+              <div class="step-info"><code>IKM = ECDH_secret (32B) || Kyber_secret (32B)</code></div>
+            </div>
+            <div class="step-status">✓</div>
+          </div>
+
+          <div class="step-item completed" id="step-4">
+            <div class="step-number">4</div>
+            <div class="step-details">
+              <div class="step-heading">AES-256-GCM Session Established</div>
+              <div class="step-info">Authenticated AEAD encryption live for messaging</div>
+            </div>
+            <div class="step-status">✓</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Key & Parameter Inspector -->
+      <div class="card-glass inspector-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <h3>Cryptographic Wire Inspector</h3>
+        </div>
+
+        <div class="inspector-grid">
+          <div class="param-box">
+            <div class="param-label">Classical KEM (NIST P-256)</div>
+            <div class="param-value">ECDH SECP256R1</div>
+            <div class="param-bytes" id="param-ecdh-size">91 Bytes (DER SubjectPublicKeyInfo)</div>
+          </div>
+
+          <div class="param-box">
+            <div class="param-label">Post-Quantum KEM (FIPS 203)</div>
+            <div class="param-value">Kyber512 / ML-KEM-512</div>
+            <div class="param-bytes" id="param-kyber-size">800 Bytes Public Key / 768 Bytes Ciphertext</div>
+          </div>
+
+          <div class="param-box">
+            <div class="param-label">Derived Symmetric Session Key</div>
+            <div class="param-value highlight">AES-256-GCM (32 Bytes)</div>
+            <div class="param-bytes">HKDF Tag: <code>hybrid-pqc-chat-v1</code></div>
+          </div>
+
+          <div class="param-box">
+            <div class="param-label">Active Fingerprint</div>
+            <div class="param-value code-accent" id="param-fingerprint">Generating...</div>
+            <div class="param-bytes">SHA256 Truncated 64-bit verification tag</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Why Hybrid (Threat Resilience) Card -->
+      <div class="card-glass matrix-card">
+        <div class="card-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          <h3>Quantum Threat Model Matrix</h3>
+        </div>
+
+        <table class="threat-table">
+          <thead>
+            <tr>
+              <th>Adversary Threat</th>
+              <th>ECDH Alone</th>
+              <th>Kyber Alone</th>
+              <th>Hybrid (Ours)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Current Classical</td>
+              <td class="sec-yes">✓ Secure</td>
+              <td class="sec-yes">✓ Secure</td>
+              <td class="sec-yes">✓ Secure</td>
+            </tr>
+            <tr>
+              <td>Quantum (Shor's)</td>
+              <td class="sec-no">✗ Broken</td>
+              <td class="sec-yes">✓ Secure</td>
+              <td class="sec-yes">✓ Secure</td>
+            </tr>
+            <tr>
+              <td>Flaw in New Math</td>
+              <td class="sec-yes">✓ Secure</td>
+              <td class="sec-no">✗ Broken</td>
+              <td class="sec-yes">✓ Secure</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="threat-note">Complies with NIST, ETSI, and BSI transition mandates: Secure as long as <em>either</em> primitive holds.</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- CLI Connector Modal -->
+  <div class="modal-overlay hidden" id="cli-modal">
+    <div class="modal-card card-glass">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <h3>Connect via Python CLI Client</h3>
+        </div>
+        <button class="btn-close" id="btn-close-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p>You can connect terminal clients directly to this hosted instance using the included Python WebSocket client.</p>
+
+        <div class="code-block">
+          <div class="code-label">1. Clone & Install Dependencies</div>
+          <pre><code>pip install -r requirements.txt</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">2. Run WebSocket CLI Client against this server</div>
+          <div class="code-copy-wrapper">
+            <pre><code id="cli-command-text">python ws_client.py --server ws://localhost:8000/ws/chat --username Bob</code></pre>
+            <button class="btn-copy" id="btn-copy-command">Copy</button>
+          </div>
+        </div>
+
+        <div class="code-block">
+          <div class="code-label">3. Automated Demo Test Mode</div>
+          <pre><code>python ws_client.py --demo</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <p>Hybrid Post-Quantum Cryptography Chat — Built with liboqs-python, cryptography, FastAPI, and WebSockets.</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

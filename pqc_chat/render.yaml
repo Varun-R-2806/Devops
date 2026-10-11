@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: pqc-secure-chat
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: 8000

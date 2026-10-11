@@ -4,6 +4,7 @@ Combines classical ECDH (SECP256R1) and post-quantum Kyber512
 to produce a single AES-256-GCM session key.
 """
 
+import base64
 import os
 from cryptography.hazmat.primitives.asymmetric.ec import (
     SECP256R1,
@@ -96,3 +97,17 @@ def decrypt_message(key: bytes, data: bytes) -> str:
     ct_and_tag = data[12:]
     plaintext_bytes = aesgcm.decrypt(nonce, ct_and_tag, None)
     return plaintext_bytes.decode()
+
+
+# ---------------------------------------------------------------------------
+# Base64 serialization helpers for JSON / WebSocket transport
+# ---------------------------------------------------------------------------
+def b64encode(data: bytes) -> str:
+    """Encode bytes to ASCII base64 string."""
+    return base64.b64encode(data).decode("ascii")
+
+
+def b64decode(s: str) -> bytes:
+    """Decode ASCII base64 string to bytes."""
+    return base64.b64decode(s.encode("ascii"))
+
